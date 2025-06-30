@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		87502E8A2D3BE8D5002E7778 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 87502E892D3BE8D5002E7778 /* Carbon.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		87502E672D3BE617002E7778 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,11 +31,25 @@
 		87502E552D3BE616002E7778 /* DesmosPopUp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DesmosPopUp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		87502E662D3BE617002E7778 /* DesmosPopUpTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DesmosPopUpTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		87502E702D3BE617002E7778 /* DesmosPopUpUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DesmosPopUpUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		87502E892D3BE8D5002E7778 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		87502E872D3BE69F002E7778 /* Exceptions for "DesmosPopUp" folder in "DesmosPopUp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 87502E542D3BE616002E7778 /* DesmosPopUp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		87502E572D3BE616002E7778 /* DesmosPopUp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				87502E872D3BE69F002E7778 /* Exceptions for "DesmosPopUp" folder in "DesmosPopUp" target */,
+			);
 			path = DesmosPopUp;
 			sourceTree = "<group>";
 		};
@@ -52,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				87502E8A2D3BE8D5002E7778 /* Carbon.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +97,7 @@
 				87502E572D3BE616002E7778 /* DesmosPopUp */,
 				87502E692D3BE617002E7778 /* DesmosPopUpTests */,
 				87502E732D3BE617002E7778 /* DesmosPopUpUITests */,
+				87502E882D3BE8CD002E7778 /* Frameworks */,
 				87502E562D3BE616002E7778 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +110,14 @@
 				87502E702D3BE617002E7778 /* DesmosPopUpUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		87502E882D3BE8CD002E7778 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				87502E892D3BE8D5002E7778 /* Carbon.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -401,6 +429,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DesmosPopUp/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -428,6 +457,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DesmosPopUp/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
