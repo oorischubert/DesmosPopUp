@@ -53,26 +53,29 @@ func HotKeyHandlerCallback(
 @objc class AppDelegate: NSObject, NSApplicationDelegate {
     // Keep a reference to the webview to easily load new URLs.
     var desmosWebView: WKWebView?
+    // Pre‑loaded webviews for each calculator
+    var matrixWebView: WKWebView!
+    var graphingWebView: WKWebView!
+    var scientificWebView: WKWebView!
+
+    // Buttons to indicate which Desmos calculator is active
+    var matrixButton: NSButton!
+    var graphingButton: NSButton!
+    var scientificButton: NSButton!
 
     @objc func loadMatrix() {
-        guard let webView = desmosWebView,
-              let url = URL(string: "https://www.desmos.com/matrix")
-        else { return }
-        webView.load(URLRequest(url: url))
+        switchTo(matrixWebView)
+        updateSelection(matrixButton)
     }
 
     @objc func loadGraphing() {
-        guard let webView = desmosWebView,
-              let url = URL(string: "https://www.desmos.com/calculator")
-        else { return }
-        webView.load(URLRequest(url: url))
+        switchTo(graphingWebView)
+        updateSelection(graphingButton)
     }
     
     @objc func loadScientific() {
-        guard let webView = desmosWebView,
-              let url = URL(string: "https://www.desmos.com/scientific")
-        else { return }
-        webView.load(URLRequest(url: url))
+        switchTo(scientificWebView)
+        updateSelection(scientificButton)
     }
     
 
@@ -99,15 +102,27 @@ func HotKeyHandlerCallback(
         window.isReleasedWhenClosed = false
         window.level = .floating
 
-        // Create a WKWebView
-        desmosWebView = WKWebView(frame: window.contentView!.bounds)
-        guard let webView = desmosWebView else { return }
-        webView.autoresizingMask = [.width, .height]
-        window.contentView?.addSubview(webView)
-        
+        // Preload the three calculator webviews
+        let contentBounds = window.contentView!.bounds
 
-        // Load Desmos
-        loadScientific()
+        matrixWebView = WKWebView(frame: contentBounds)
+        graphingWebView = WKWebView(frame: contentBounds)
+        scientificWebView = WKWebView(frame: contentBounds)
+
+        for view in [matrixWebView, graphingWebView, scientificWebView] {
+            view!.autoresizingMask = [.width, .height]
+            window.contentView?.addSubview(view!)
+        }
+
+        matrixWebView.load(URLRequest(url: URL(string: "https://www.desmos.com/matrix")!))
+        graphingWebView.load(URLRequest(url: URL(string: "https://www.desmos.com/calculator")!))
+        scientificWebView.load(URLRequest(url: URL(string: "https://www.desmos.com/scientific")!))
+
+        // Show scientific by default
+        matrixWebView.isHidden = true
+        graphingWebView.isHidden = true
+        scientificWebView.isHidden = false
+        desmosWebView = scientificWebView
         
         // ---- ADD A TITLE BAR ACCESSORY WITH TWO ICON BUTTONS ----
             let accessoryVC = NSTitlebarAccessoryViewController()
@@ -138,6 +153,10 @@ func HotKeyHandlerCallback(
         iconToggleButton.action = #selector(toggleStatusIconFromTitlebar(_:))
         iconToggleButton.target = self
         containerView.addSubview(iconToggleButton)
+        
+        // Bold button setting
+        let boldConfig = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize, weight: .bold)
+        let boldWhiteConfig = boldConfig.applying(.init(paletteColors: [.white]))
 
         // Then attach
         window.addTitlebarAccessoryViewController(accessoryVC)
@@ -148,33 +167,49 @@ func HotKeyHandlerCallback(
         rightAccessoryVC.view = rightContainer
 
         // Button to load Matrix
-        let matrixButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
+        matrixButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
+        matrixButton.setButtonType(.toggle)
         matrixButton.bezelStyle = .inline
         matrixButton.title = ""
         matrixButton.image = NSImage(systemSymbolName: "tablecells", accessibilityDescription: "Matrix")
+        matrixButton.alternateImage = NSImage(systemSymbolName: "tablecells",
+                                              accessibilityDescription: "Matrix (selected)")?
+            .withSymbolConfiguration(boldWhiteConfig)
+        
         matrixButton.action = #selector(loadMatrix)
         matrixButton.target = self
         rightContainer.addSubview(matrixButton)
 
         // Button to load Graphing Calculator
-        let graphingButton = NSButton(frame: NSRect(x: 30, y: 0, width: 25, height: 25))
+        graphingButton = NSButton(frame: NSRect(x: 30, y: 0, width: 25, height: 25))
+        graphingButton.setButtonType(.toggle)
         graphingButton.bezelStyle = .inline
         graphingButton.title = ""
         graphingButton.image = NSImage(systemSymbolName: "chart.xyaxis.line", accessibilityDescription: "Graphing")
+        graphingButton.alternateImage = NSImage(systemSymbolName: "chart.xyaxis.line",
+                                                accessibilityDescription: "Graphing (selected)")?
+            .withSymbolConfiguration(boldWhiteConfig)
+
         graphingButton.action = #selector(loadGraphing)
         graphingButton.target = self
         rightContainer.addSubview(graphingButton)
         
         // Button to load Scientific Calculator
-        let scientificButton = NSButton(frame: NSRect(x: 60, y: 0, width: 25, height: 25))
+        scientificButton = NSButton(frame: NSRect(x: 60, y: 0, width: 25, height: 25))
+        scientificButton.setButtonType(.toggle)
         scientificButton.bezelStyle = .inline
         scientificButton.title = ""
         scientificButton.image = NSImage(systemSymbolName: "function", accessibilityDescription: "Scientific")
+        scientificButton.alternateImage = NSImage(systemSymbolName: "function",
+                                                  accessibilityDescription: "Scientific (selected)")?
+            .withSymbolConfiguration(boldWhiteConfig)
         scientificButton.action = #selector(loadScientific)
         scientificButton.target = self
         rightContainer.addSubview(scientificButton)
 
         window.addTitlebarAccessoryViewController(rightAccessoryVC)
+        // Highlight “Scientific” by default
+        updateSelection(scientificButton)
         // ----------------------------------------------
        
         let wc = NSWindowController(window: window)
@@ -220,6 +255,27 @@ func HotKeyHandlerCallback(
 
 
     
+    /// Switches the visible webview; reloads if already active
+    func switchTo(_ webView: WKWebView) {
+        if desmosWebView === webView {
+            webView.reload()
+            return
+        }
+        desmosWebView?.isHidden = true
+        webView.isHidden = false
+        desmosWebView = webView
+    }
+
+    /// Highlights the selected calculator button in bold white and dims the others
+    func updateSelection(_ selected: NSButton?) {
+        let buttons = [matrixButton, graphingButton, scientificButton]
+        for button in buttons {
+            guard let button = button else { continue }
+            button.state = (button == selected) ? .on : .off
+        }
+    }
+
+
     func registerGlobalHotKey() {
         // Example: Command + D
 //        let keyCode = UInt32(kVK_ANSI_D)
