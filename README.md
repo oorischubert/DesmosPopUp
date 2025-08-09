@@ -5,11 +5,10 @@ DesmosPopUp is a lightweight macOS menu bar app that provides quick access to De
 ## Features
 
 - **Menu Bar Icon**: Quickly show/hide the Desmos window from your menu bar.
-- **Global Hotkey**: Instantly toggle the Desmos window from anywhere (default: Option + D).
+- **Configurable Global Hotkey**: Instantly toggle the Desmos window from anywhere (default: Option + D), and change it via Settings.
 - **Floating Window**: The Desmos window stays on top of other windows for easy access.
 - **Switch Calculators**: Use title bar buttons to switch between Scientific, Graphing, and Matrix calculators.
-- **Hide/Show Menu Bar Icon**: Toggle the menu bar icon from the window's title bar.
-- **Quit Button**: Easily quit the app from the window's title bar.
+- **Settings Menu**: A gear button in the title bar opens a menu with: Set Hotkey, Hide/Show Icon, and Quit.
 
 ## Installation
 
@@ -30,13 +29,15 @@ DesmosPopUp is a lightweight macOS menu bar app that provides quick access to De
 - Click the menu bar icon (a "D" in a circle) to show or hide the Desmos window.
 - Use the global hotkey (Option + D by default) to toggle the window from anywhere.
 - In the Desmos window's title bar:
-  - Use the leftmost button (X) to quit the app.
-  - Use the eye icon to hide/show the menu bar icon.
   - Use the right-side buttons to switch between Matrix, Graphing, and Scientific calculators.
+  - Click the gear button to open Settings:
+    - Set Hotkey…: Press a new shortcut (must include ⌘/⌥/⇧/⌃). Press Esc to cancel.
+    - Hide/Show Icon: Toggle the menu bar icon.
+    - Quit: Exit the app.
 
 ## Customization
 
-- **Hotkey**: The default hotkey is Option + D. (Changing the hotkey via UI is not yet implemented.)
+- **Hotkey**: The default hotkey is Option + D. To change it, open Settings (gear in the title bar) → Set Hotkey, then press your desired combination (requires at least one modifier: ⌘, ⌥, ⇧, or ⌃). The selection is saved and persists across launches. Press Esc to cancel.
 - **Window**: The window floats above other apps and can be resized, but not below a minimum size.
 
 ## Requirements

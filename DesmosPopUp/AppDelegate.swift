@@ -9,12 +9,13 @@ import Cocoa
 import Carbon.HIToolbox
 import WebKit
 
-// (1) Manually define missing Carbon constants (if not in bridging header)
+// MARK: - Carbon constants (if not in bridging header)
 public let kEventParamNameHotKeyID: UInt32 = 0x686B6964  // 'hkid'
 public let typeEventHotKeyID: UInt32      = 0x686B6964   // 'hkid'
 public let kEventClassKeyboard: UInt32    = 0x6B657962   // 'keyb'
-public let kEventHotKeyPressed: UInt32   = 6
-public let kVK_ANSI_D: Int32             = 2
+public let kEventHotKeyPressed: UInt32    = 6
+public let kVK_ANSI_D: Int32              = 2
+public let kVK_Escape: UInt16             = 53
 
 // (2) Define the callback as a top-level C function
 //     In 64-bit, we do not need NewEventHandlerUPP.
@@ -24,24 +25,11 @@ func HotKeyHandlerCallback(
     eventRef: EventRef?,
     userData: UnsafeMutableRawPointer?
 ) -> OSStatus {
+#if DEBUG
     print("HotKeyHandlerCallback triggered!")
-    // Extract the hotkey ID
+#endif
+    // Extract the hotkey ID (optional — left blank; we register only one ID = 0)
     let hkID = EventHotKeyID()
-//    let err = GetEventParameter(
-//        eventRef,
-//        EventParamName(kEventParamNameHotKeyID),
-//        EventParamType(typeEventHotKeyID),
-//        nil,
-//        MemoryLayout.size(ofValue: hkID),
-//        nil,
-//        &hkID
-//    )
-    print("ID",hkID.id)
-    let eventClass = GetEventClass(eventRef)
-    let eventKind = GetEventKind(eventRef)
-    print("Event class:", eventClass, "Event kind:", eventKind)
-    //guard err == noErr else { return noErr }
-    
     // If it matches our ID, toggle the Desmos window
     if hkID.id == 0, let userData = userData {  //changed from 1
         let mySelf = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
@@ -51,6 +39,8 @@ func HotKeyHandlerCallback(
 }
 
 @objc class AppDelegate: NSObject, NSApplicationDelegate {
+
+    // MARK: - WebViews & UI elements
     // Keep a reference to the webview to easily load new URLs.
     var desmosWebView: WKWebView?
     // Pre‑loaded webviews for each calculator
@@ -63,31 +53,45 @@ func HotKeyHandlerCallback(
     var graphingButton: NSButton!
     var scientificButton: NSButton!
 
-    @objc func loadMatrix() {
+    @objc private func loadMatrix() {
         switchTo(matrixWebView)
         updateSelection(matrixButton)
     }
 
-    @objc func loadGraphing() {
+    @objc private func loadGraphing() {
         switchTo(graphingWebView)
         updateSelection(graphingButton)
     }
     
-    @objc func loadScientific() {
+    @objc private func loadScientific() {
         switchTo(scientificWebView)
         updateSelection(scientificButton)
     }
-    
+
+    // MARK: - Window / Status Item
 
     var desmosWindowController: NSWindowController?
     var statusItem: NSStatusItem?
     var isStatusItemVisible = true
 
-        func applicationDidFinishLaunching(_ aNotification: Notification) {
-            setupDesmosWindow()
-            registerGlobalHotKey()
-            setupStatusItem()
-        }
+    // MARK: - Hotkey (state, persistence)
+    var hotKeyRef: EventHotKeyRef?
+    var currentHotKeyCode: UInt32 = UInt32(kVK_ANSI_D)          // default: D
+    var currentHotKeyModifiers: UInt32 = UInt32(optionKey)      // default: ⌥
+    var currentHotKeyDisplay: String = "⌥D"                     // user-visible text
+    var hotkeyCaptureMonitor: Any?
+    var hotKeyHandlerInstalled = false
+    // --- Persistence keys ---
+    private let defaultsKeyHotKeyCode = "DesmosHotkeyKeyCode"
+    private let defaultsKeyHotKeyMods = "DesmosHotkeyModifiers"
+    private let defaultsKeyHotKeyDisplay = "DesmosHotkeyDisplay"
+
+    func applicationDidFinishLaunching(_ aNotification: Notification) {
+        setupDesmosWindow()
+        loadHotkeyFromDefaults()
+        registerGlobalHotKey()
+        setupStatusItem()
+    }
 
     func setupDesmosWindow() {
         let window = NSWindow(
@@ -99,15 +103,25 @@ func HotKeyHandlerCallback(
         window.title = "Desmos"
         // Prevent window from being resized below a minimum size
         window.minSize = NSSize(width: 225, height: 400)
-        window.isReleasedWhenClosed = false
-        window.level = .floating
+        // Make the window itself transparent so vibrancy shines through
+        window.isOpaque = false
+        window.backgroundColor = .clear
 
-        // Preload the three calculator webviews
         let contentBounds = window.contentView!.bounds
+        // ---------- Frosted blur background ----------
+        let blurView = NSVisualEffectView(frame: contentBounds)
+        blurView.autoresizingMask = [.width, .height]
+        blurView.material = .sidebar          // pick the material you prefer
+        blurView.blendingMode = .behindWindow
+        blurView.state = .active
+        window.contentView?.addSubview(blurView)
 
         matrixWebView = WKWebView(frame: contentBounds)
+        matrixWebView.setValue(false, forKey: "drawsBackground")  // transparency
         graphingWebView = WKWebView(frame: contentBounds)
+        graphingWebView.setValue(false, forKey: "drawsBackground")
         scientificWebView = WKWebView(frame: contentBounds)
+        scientificWebView.setValue(false, forKey: "drawsBackground")
 
         for view in [matrixWebView, graphingWebView, scientificWebView] {
             view!.autoresizingMask = [.width, .height]
@@ -124,42 +138,29 @@ func HotKeyHandlerCallback(
         scientificWebView.isHidden = false
         desmosWebView = scientificWebView
         
-        // ---- ADD A TITLE BAR ACCESSORY WITH TWO ICON BUTTONS ----
-            let accessoryVC = NSTitlebarAccessoryViewController()
+        // ---- ADD A TITLE BAR ACCESSORY WITH SETTINGS BUTTON ----
+        let accessoryVC = NSTitlebarAccessoryViewController()
         // Instead of accessoryVC.layoutAttribute = .right
         accessoryVC.layoutAttribute = .left
 
-        // For example, a 90-wide container, placing your 3 icons from left to right:
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 60, height: 30))
+        // Container with a single Settings (gear) button that shows a pop-down menu
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
         accessoryVC.view = containerView
 
-        // 1) Quit button (left-most, near traffic lights)
-        let quitButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
-        quitButton.bezelStyle = .inline
-        quitButton.title = ""
-        quitButton.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Quit Desmos")
-        quitButton.action = #selector(quitApp)
-        quitButton.target = self
-        containerView.addSubview(quitButton)
+        let settingsButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
+        settingsButton.bezelStyle = .inline
+        settingsButton.title = ""
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        settingsButton.action = #selector(showSettingsMenu(_:))
+        settingsButton.target = self
+        containerView.addSubview(settingsButton)
 
-
-        // 3) Toggle icon (right-most)
-        let iconToggleButton = NSButton(frame: NSRect(x: 30, y: 0, width: 25, height: 25))
-        iconToggleButton.bezelStyle = .inline
-        iconToggleButton.setButtonType(.toggle)
-        iconToggleButton.title = ""
-        iconToggleButton.image = NSImage(systemSymbolName: "eye", accessibilityDescription: "Toggle Status Icon")
-        iconToggleButton.state = isStatusItemVisible ? .on : .off
-        iconToggleButton.action = #selector(toggleStatusIconFromTitlebar(_:))
-        iconToggleButton.target = self
-        containerView.addSubview(iconToggleButton)
+        // Then attach
+        window.addTitlebarAccessoryViewController(accessoryVC)
         
         // Bold button setting
         let boldConfig = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize, weight: .bold)
         let boldWhiteConfig = boldConfig.applying(.init(paletteColors: [.white]))
-
-        // Then attach
-        window.addTitlebarAccessoryViewController(accessoryVC)
         // Create a second titlebar accessory for the right side
         let rightAccessoryVC = NSTitlebarAccessoryViewController()
         rightAccessoryVC.layoutAttribute = .right
@@ -215,48 +216,84 @@ func HotKeyHandlerCallback(
         let wc = NSWindowController(window: window)
         desmosWindowController = wc
         wc.window?.orderOut(nil)
-        print("Window setup!")
         toggleDesmosWindow()
     }
     
-    @objc func toggleStatusIconFromTitlebar(_ sender: NSButton) {
-        if sender.state == .on {
-            // Show the status icon, set normal “function” image
-            if !isStatusItemVisible {
-                setupStatusItem()
-                isStatusItemVisible = true
-            }
-            // Switch the button’s icon to “function”
-            sender.image = NSImage(systemSymbolName: "eye",
-                                   accessibilityDescription:  "Hide Status Icon")
-        } else {
-            // Hide the status icon
-            if isStatusItemVisible, let statusItem = statusItem {
-                NSStatusBar.system.removeStatusItem(statusItem)
-                self.statusItem = nil
-                isStatusItemVisible = false
-            }
-            // Switch the button’s icon to an “X” symbol
-            sender.image = NSImage(systemSymbolName: "eye.slash",
-                                   accessibilityDescription: "Show Status Icon")
+    /// Toggles the presence of the status bar icon without relying on a sender button.
+    @objc private func toggleStatusIcon() {
+        if isStatusItemVisible, let statusItem = statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+            isStatusItemVisible = false
+        } else if !isStatusItemVisible {
+            setupStatusItem()
+            isStatusItemVisible = true
         }
     }
 
-        @objc func toggleDesmosWindow() {
-            print("toggleDesmosWindow called!")
-            guard let wc = desmosWindowController, let window = wc.window else { return }
-            if window.isVisible {
-                window.orderOut(nil)
-            } else {
-                wc.showWindow(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
+    @objc private func toggleStatusIconFromTitlebar(_ sender: NSButton) {
+        toggleStatusIcon()
+        // Update the button image only if such a button exists/was used
+        sender.image = NSImage(systemSymbolName: isStatusItemVisible ? "eye" : "eye.slash",
+                               accessibilityDescription: isStatusItemVisible ? "Hide Status Icon" : "Show Status Icon")
+        sender.state = isStatusItemVisible ? .on : .off
+    }
+
+    /// Shows a pop-down settings menu anchored to the gear button.
+    @objc private func showSettingsMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+
+        // Show current hotkey
+        let currentItem = NSMenuItem(title: "Hotkey: \(currentHotKeyDisplay)", action: nil, keyEquivalent: "")
+        currentItem.isEnabled = false
+        menu.addItem(currentItem)
+        menu.addItem(NSMenuItem.separator())
+
+        // 1) Change Hotkey…
+        let hotkeyItem = NSMenuItem(title: "Set Hotkey", action: #selector(showHotkeyChangeDialog), keyEquivalent: "")
+        hotkeyItem.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)
+        hotkeyItem.target = self
+        menu.addItem(hotkeyItem)
+
+        // 2) Toggle status bar icon item
+        let toggleTitle = isStatusItemVisible ? "Hide Icon" : "Show Icon"
+        let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleStatusIconFromMenu(_:)), keyEquivalent: "")
+        toggleItem.image = NSImage(systemSymbolName: isStatusItemVisible ? "eye.slash" : "eye", accessibilityDescription: nil)
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        // 3) Quit item
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "")
+        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Show as a pop-down under the gear button
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height - 2), in: sender)
+    }
+
+    /// Action invoked from the settings menu to toggle the status bar icon.
+    @objc private func toggleStatusIconFromMenu(_ sender: Any?) {
+        toggleStatusIcon()
+    }
+
+    @objc fileprivate func toggleDesmosWindow() {
+#if DEBUG
+        print("toggleDesmosWindow")
+#endif
+        guard let wc = desmosWindowController, let window = wc.window else { return }
+        if window.isVisible {
+            window.orderOut(nil)
+        } else {
+            wc.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
+    }
 
 
     
     /// Switches the visible webview; reloads if already active
-    func switchTo(_ webView: WKWebView) {
+    private func switchTo(_ webView: WKWebView) {
         if desmosWebView === webView {
             webView.reload()
             return
@@ -267,7 +304,7 @@ func HotKeyHandlerCallback(
     }
 
     /// Highlights the selected calculator button in bold white and dims the others
-    func updateSelection(_ selected: NSButton?) {
+    private func updateSelection(_ selected: NSButton?) {
         let buttons = [matrixButton, graphingButton, scientificButton]
         for button in buttons {
             guard let button = button else { continue }
@@ -275,75 +312,174 @@ func HotKeyHandlerCallback(
         }
     }
 
-
+    // MARK: - Hotkey Registration
     func registerGlobalHotKey() {
-        // Example: Command + D
-//        let keyCode = UInt32(kVK_ANSI_D)
-//        let modifiers = UInt32(cmdKey)
-        let keyCode = UInt32(kVK_ANSI_D) // G key
-        let modifiers = UInt32(optionKey) // Command+Option+G
-        
-        // Create an EventHotKeyID
-        let hotKeyID = EventHotKeyID(
+        // Unregister any previous hotkey
+        if let ref = hotKeyRef {
+            UnregisterEventHotKey(ref)
+            hotKeyRef = nil
+        }
+
+        // Prepare HotKeyID; keep ID == 0 to match our callback check
+        var hotKeyID = EventHotKeyID(
             signature: OSType(UInt32(0x44440000)), // 'DD\0\0'
-            id: UInt32(1)
+            id: UInt32(0)
         )
 
-        // Register the hotkey
-        var hotKeyRef: EventHotKeyRef?
+        // Register with current, mutable code/modifiers
+        var newRef: EventHotKeyRef?
         let status = RegisterEventHotKey(
-            keyCode,
-            modifiers,
+            currentHotKeyCode,
+            currentHotKeyModifiers,
             hotKeyID,
             GetEventDispatcherTarget(),
             0,
-            &hotKeyRef
+            &newRef
         )
-        
+
         if status != noErr {
             print("Failed to register hotkey, status \(status)")
             return
         }
-        
-        // Create an EventTypeSpec describing "Hot Key Pressed"
-        var eventTypeSpec = EventTypeSpec(
-            eventClass: kEventClassKeyboard,
-            eventKind: kEventHotKeyPressed
-        )
+        hotKeyRef = newRef
 
-        // (3) Pass our function pointer directly:
-        InstallEventHandler(
-            GetEventDispatcherTarget(),
-            HotKeyHandlerCallback,  // no NewEventHandlerUPP needed
-            1,
-            &eventTypeSpec,
-            UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
-            nil
-        )
-    }
-    
-    // The rest of your code:
-    // statusItem, setupDesmosWindow, toggleDesmosWindow, etc.
-    
-    func setupStatusItem() {
-            // Create the menu bar icon
-            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            if let button = statusItem?.button {
-                button.image = NSImage(systemSymbolName: "d.circle", accessibilityDescription: nil)
-                button.action = #selector(toggleDesmosWindow)
-                button.target = self
-            }
+        // Install the handler only once
+        var eventTypeSpec = EventTypeSpec(eventClass: kEventClassKeyboard, eventKind: kEventHotKeyPressed)
+        if !hotKeyHandlerInstalled {
+            InstallEventHandler(
+                GetEventDispatcherTarget(),
+                HotKeyHandlerCallback,
+                1,
+                &eventTypeSpec,
+                UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
+                nil
+            )
+            hotKeyHandlerInstalled = true
         }
+    }
     
-    @objc func showHotkeyChangeDialog() {
-        // Placeholder: If you want to let the user pick another hotkey,
-        // you’d show a custom UI or an NSAlert.
-        // Then you'd re-register your hotkey with new code or modifiers.
-        print("User wants to change hotkey… (not implemented yet)")
+    // Convert NSEvent.ModifierFlags to Carbon mask
+    private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        var carbon: UInt32 = 0
+        if flags.contains(.command) { carbon |= UInt32(cmdKey) }
+        if flags.contains(.option)  { carbon |= UInt32(optionKey) }
+        if flags.contains(.shift)   { carbon |= UInt32(shiftKey) }
+        if flags.contains(.control) { carbon |= UInt32(controlKey) }
+        return carbon
     }
 
-    @objc func quitApp() {
+    // Make something like "⌘⌥D"
+    private func displayString(modifiers: NSEvent.ModifierFlags, key: String) -> String {
+        var s = ""
+        if modifiers.contains(.command) { s += "⌘" }
+        if modifiers.contains(.option)  { s += "⌥" }
+        if modifiers.contains(.shift)   { s += "⇧" }
+        if modifiers.contains(.control) { s += "⌃" }
+        s += key.uppercased()
+        return s
+    }
+
+    @objc private func showHotkeyChangeDialog() {
+        beginHotkeyCapture()
+    }
+
+    // MARK: - Hotkey Capture
+    /// Begin capturing a new hotkey via a sheet + local key monitor
+    private func beginHotkeyCapture() {
+        guard let window = desmosWindowController?.window else {
+            print("No window available for hotkey capture.")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Set Hotkey"
+        alert.informativeText = "Press the new shortcut now (include at least one modifier: ⌘, ⌥, ⇧, or ⌃). Press Esc to cancel."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Cancel")
+
+        // Local monitor captures the next keyDown
+        hotkeyCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard let self = self else { return event }
+            // Escape cancels
+            if event.keyCode == kVK_Escape { // Esc
+                self.endHotkeyCapture(alert: alert, window: window, cancelled: true)
+                return nil
+            }
+
+            // Require at least one modifier
+            let mods = event.modifierFlags.intersection([.command, .option, .shift, .control])
+            if mods.isEmpty {
+                NSSound.beep()
+                return nil
+            }
+
+            // Determine key string
+            let keyString = (event.charactersIgnoringModifiers ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if keyString.isEmpty {
+                NSSound.beep()
+                return nil
+            }
+
+            // Update and re-register
+            self.currentHotKeyCode = UInt32(event.keyCode)
+            self.currentHotKeyModifiers = self.carbonModifiers(from: mods)
+            self.currentHotKeyDisplay = self.displayString(modifiers: mods, key: keyString)
+            self.saveHotkeyToDefaults()
+            self.registerGlobalHotKey()
+
+            // Done
+            self.endHotkeyCapture(alert: alert, window: window, cancelled: false)
+            return nil
+        })
+
+        // Present as sheet so app stays key
+        alert.beginSheetModal(for: window) { _ in
+            // Cleanup handled in endHotkeyCapture
+        }
+    }
+
+    private func saveHotkeyToDefaults() {
+        let d = UserDefaults.standard
+        d.set(Int(currentHotKeyCode), forKey: defaultsKeyHotKeyCode)
+        d.set(Int(currentHotKeyModifiers), forKey: defaultsKeyHotKeyMods)
+        d.set(currentHotKeyDisplay, forKey: defaultsKeyHotKeyDisplay)
+    }
+
+    private func loadHotkeyFromDefaults() {
+        let d = UserDefaults.standard
+        if d.object(forKey: defaultsKeyHotKeyCode) != nil,
+           d.object(forKey: defaultsKeyHotKeyMods) != nil,
+           let disp = d.string(forKey: defaultsKeyHotKeyDisplay) {
+            currentHotKeyCode = UInt32(d.integer(forKey: defaultsKeyHotKeyCode))
+            currentHotKeyModifiers = UInt32(d.integer(forKey: defaultsKeyHotKeyMods))
+            currentHotKeyDisplay = disp
+        }
+    }
+
+    private func endHotkeyCapture(alert: NSAlert, window: NSWindow, cancelled: Bool) {
+        if let monitor = hotkeyCaptureMonitor {
+            NSEvent.removeMonitor(monitor)
+            hotkeyCaptureMonitor = nil
+        }
+        window.endSheet(alert.window)
+        if cancelled {
+            print("Hotkey capture cancelled.")
+        } else {
+            print("New hotkey set to: \(currentHotKeyDisplay)")
+        }
+    }
+
+    private func setupStatusItem() {
+        // Create the menu bar icon
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem?.button {
+            button.image = NSImage(systemSymbolName: "d.circle", accessibilityDescription: nil)
+            button.action = #selector(toggleDesmosWindow)
+            button.target = self
+        }
+    }
+
+    @objc private func quitApp() {
         NSApp.terminate(nil)
     }
-    
 }
