@@ -4,7 +4,7 @@ DesmosPopUp is a lightweight macOS menu bar app that provides quick access to De
 
 ## Features
 
-- **Menu Bar Icon**: Quickly show/hide the Desmos window from your menu bar.
+- **Menu Bar Icon**: Click the menu bar icon to access a dropdown menu with Scientific, Graphing, and Matrix calculator options, plus Quit.
 - **Configurable Global Hotkey**: Instantly toggle the Desmos window from anywhere (default: Option + D), and change it via Settings.
 - **Floating Window**: The Desmos window stays on top of other windows for easy access.
 - **Switch Calculators**: Use title bar buttons to switch between Scientific, Graphing, and Matrix calculators.
@@ -26,7 +26,11 @@ DesmosPopUp is a lightweight macOS menu bar app that provides quick access to De
 
 ## Usage
 
-- Click the menu bar icon (a "D" in a circle) to show or hide the Desmos window.
+- Click the menu bar icon (a "D" in a circle) to open a dropdown menu with calculator options:
+  - Scientific calculator icon: Opens the window with Scientific calculator
+  - Graphing calculator icon: Opens the window with Graphing calculator
+  - Matrix calculator icon: Opens the window with Matrix calculator
+  - Quit icon: Exits the app
 - Use the global hotkey (Option + D by default) to toggle the window from anywhere.
 - In the Desmos window's title bar:
   - Use the right-side buttons to switch between Matrix, Graphing, and Scientific calculators.

@@ -322,12 +322,16 @@ func HotKeyHandlerCallback(
 
 
     
-    /// Switches the visible webview; reloads if already active
+    /// Switches the visible webview; reloads if already active, but only when window is visible
     private func switchTo(_ webView: WKWebView) {
+        // If the requested webView is already active, only refresh when the window is visible
         if desmosWebView === webView {
-            webView.reload()
+            if let isVisible = desmosWindowController?.window?.isVisible, isVisible {
+                webView.reload()
+            }
             return
         }
+        // Otherwise switch without forcing a refresh
         desmosWebView?.isHidden = true
         webView.isHidden = false
         desmosWebView = webView
