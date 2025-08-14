@@ -56,16 +56,19 @@ func HotKeyHandlerCallback(
     @objc private func loadMatrix() {
         switchTo(matrixWebView)
         updateSelection(matrixButton)
+        updateStatusMenuSelection()
     }
 
     @objc private func loadGraphing() {
         switchTo(graphingWebView)
         updateSelection(graphingButton)
+        updateStatusMenuSelection()
     }
     
     @objc private func loadScientific() {
         switchTo(scientificWebView)
         updateSelection(scientificButton)
+        updateStatusMenuSelection()
     }
 
     // MARK: - Window / Status Item
@@ -73,6 +76,11 @@ func HotKeyHandlerCallback(
     var desmosWindowController: NSWindowController?
     var statusItem: NSStatusItem?
     var isStatusItemVisible = true
+
+    // Status-menu items (to reflect selection style)
+    private var statusScientificItem: NSMenuItem?
+    private var statusGraphingItem: NSMenuItem?
+    private var statusAlgebraItem: NSMenuItem?
 
     // MARK: - Hotkey (state, persistence)
     var hotKeyRef: EventHotKeyRef?
@@ -290,6 +298,28 @@ func HotKeyHandlerCallback(
         }
     }
 
+    /// Ensures the main window is visible, activated, then performs the provided action (like switching pages).
+    private func showWindowAnd(then action: () -> Void) {
+        action()
+        if let wc = desmosWindowController {
+            wc.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// Open specific pages from the status menu (icons only)
+    @objc private func openMatrixFromStatus() {
+        showWindowAnd { loadMatrix() }
+    }
+
+    @objc private func openGraphingFromStatus() {
+        showWindowAnd { loadGraphing() }
+    }
+
+    @objc private func openScientificFromStatus() {
+        showWindowAnd { loadScientific() }
+    }
+
 
     
     /// Switches the visible webview; reloads if already active
@@ -312,6 +342,40 @@ func HotKeyHandlerCallback(
         }
     }
 
+    /// Returns a regular SF Symbol image for the status menu.
+    private func statusImage(named: String) -> NSImage? {
+        return NSImage(systemSymbolName: named, accessibilityDescription: nil)
+    }
+
+    /// Returns a "bright" (bold white) variant of the SF Symbol for the selected menu item.
+    private func selectedStatusImage(named: String) -> NSImage? {
+        let boldConfig = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize, weight: .bold)
+        let boldWhiteConfig = boldConfig.applying(.init(paletteColors: [.white]))
+        return NSImage(systemSymbolName: named, accessibilityDescription: nil)?.withSymbolConfiguration(boldWhiteConfig)
+    }
+
+    /// Syncs the status-menu icons with the currently selected page (bright = selected).
+    private func updateStatusMenuSelection() {
+        // Scientific
+        if let item = statusScientificItem {
+            item.image = (desmosWebView === scientificWebView)
+                ? selectedStatusImage(named: "function")
+                : statusImage(named: "function")
+        }
+        // Graphing
+        if let item = statusGraphingItem {
+            item.image = (desmosWebView === graphingWebView)
+                ? selectedStatusImage(named: "chart.xyaxis.line")
+                : statusImage(named: "chart.xyaxis.line")
+        }
+        // Algebra (Matrix)
+        if let item = statusAlgebraItem {
+            item.image = (desmosWebView === matrixWebView)
+                ? selectedStatusImage(named: "tablecells")
+                : statusImage(named: "tablecells")
+        }
+    }
+
     // MARK: - Hotkey Registration
     func registerGlobalHotKey() {
         // Unregister any previous hotkey
@@ -321,7 +385,7 @@ func HotKeyHandlerCallback(
         }
 
         // Prepare HotKeyID; keep ID == 0 to match our callback check
-        var hotKeyID = EventHotKeyID(
+        let hotKeyID = EventHotKeyID(
             signature: OSType(UInt32(0x44440000)), // 'DD\0\0'
             id: UInt32(0)
         )
@@ -469,14 +533,151 @@ func HotKeyHandlerCallback(
         }
     }
 
+    /// Builds a custom status bar icon that draws a circle with two Desmos‑like wave lines.
+    private func makePopupStatusIcon(pointSize: CGFloat = 18, lineWidth: CGFloat = 1.35) -> NSImage {
+        let size = NSSize(width: pointSize, height: pointSize)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        // Use template black; system will tint to menu color (white in dark backgrounds)
+        NSColor.black.setStroke()
+
+        // Outer ring
+        let ringWidth = max(1.6, lineWidth)
+        let circleInset: CGFloat = ringWidth / 2.0 + 0.6
+        let circleRect = NSRect(x: circleInset,
+                                y: circleInset,
+                                width: size.width - 2 * circleInset,
+                                height: size.height - 2 * circleInset)
+        let ring = NSBezierPath(ovalIn: circleRect)
+        ring.lineWidth = ringWidth
+        ring.lineCapStyle = .round
+        ring.lineJoinStyle = .round
+        ring.stroke()
+
+        // Drawing area inside the ring
+        let contentInset = circleInset + ringWidth * 0.8
+        let content = NSInsetRect(NSRect(origin: .zero, size: size), contentInset, contentInset)
+        let w = content.width
+        let h = content.height
+        let midX = content.midX
+        let midY = content.midY
+
+        // Wave stroke config
+        let wave = NSBezierPath()
+        wave.lineWidth = max(1.2, lineWidth) // slightly thicker than ring for presence
+        wave.lineCapStyle = .round
+        wave.lineJoinStyle = .round
+
+        // First curve (the S-wave), vertically offset upward
+        let verticalOffset: CGFloat = 0.1 * h
+        let p0 = NSPoint(x: content.minX, y: midY - 0.28 * h + verticalOffset)
+        let c1_wave = NSPoint(x: content.minX + 0.30 * w, y: midY + 0.55 * h + verticalOffset)
+        let c2_wave = NSPoint(x: content.minX + 0.68 * w, y: midY - 0.65 * h + verticalOffset)
+        let p1 = NSPoint(x: content.maxX, y: midY - 0.30 * h + verticalOffset)
+        wave.move(to: p0)
+        wave.curve(to: p1, controlPoint1: c1_wave, controlPoint2: c2_wave)
+        wave.stroke()
+
+        // --- MODIFICATION START ---
+        // Instead of a second wave, draw a simple parabola.
+        // 0 -> perfectly flat (straight line), 1 -> original depth, >1 -> tighter (deeper) curve
+        let parabolaWidthFactor: CGFloat = 2.0
+        // Positive values raise the parabola; negative lower it. Units are a fraction of content height.
+        // Raises/lowers ONLY the parabola's bottom (vertex). Fraction of content height.
+        // Positive = higher (shallower), negative = deeper.
+        let parabolaVertexLift: CGFloat = 0.275
+
+        let parabola = NSBezierPath()
+        parabola.lineWidth = wave.lineWidth // Use same line width as the wave
+        parabola.lineCapStyle = .round
+        parabola.lineJoinStyle = .round
+
+        // Define the points for the desired quadratic curve (parabola).
+        let baselineY = midY + (0.1 + parabolaVertexLift) * h
+        let startPoint = NSPoint(x: content.minX, y: baselineY)
+        let endPoint   = NSPoint(x: content.maxX, y: baselineY)
+
+        // Compute control point depth based on width factor: 0 = flat, 1 = current depth to content.minY
+        let minYDepth = content.minY
+        let controlY = baselineY
+                     - (baselineY - minYDepth) * parabolaWidthFactor
+                     + parabolaVertexLift * h
+        let quadControlPoint = NSPoint(x: midX, y: controlY)
+
+        // To draw a quadratic curve using NSBezierPath, we must convert its single
+        // control point into two control points for the cubic `curve(to:...)` method.
+        // The formula is C = P_start + (2/3)*(P_control - P_start)
+        let c1_parabola = NSPoint(x: startPoint.x + (quadControlPoint.x - startPoint.x) * 2/3,
+                                  y: startPoint.y + (quadControlPoint.y - startPoint.y) * 2/3)
+
+        let c2_parabola = NSPoint(x: endPoint.x + (quadControlPoint.x - endPoint.x) * 2/3,
+                                  y: endPoint.y + (quadControlPoint.y - endPoint.y) * 2/3)
+
+        parabola.move(to: startPoint)
+        parabola.curve(to: endPoint, controlPoint1: c1_parabola, controlPoint2: c2_parabola)
+        parabola.stroke()
+        // --- MODIFICATION END ---
+
+        image.isTemplate = true
+        return image
+    }
+
     private func setupStatusItem() {
-        // Create the menu bar icon
+        // Create the status bar item (square length for icon)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        // Set the status bar icon (no text)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "d.circle", accessibilityDescription: nil)
-            button.action = #selector(toggleDesmosWindow)
-            button.target = self
+            button.image = makePopupStatusIcon()
+            button.imagePosition = .imageOnly
+            // Do NOT set action/target here; clicking should open the menu.
         }
+
+        // Build an icon-only menu
+        let menu = NSMenu()
+
+        // 1) Function (Scientific)
+        let scientificItem = NSMenuItem()
+        scientificItem.title = "" // icon only
+        scientificItem.action = #selector(openScientificFromStatus)
+        scientificItem.target = self
+        statusScientificItem = scientificItem
+        menu.addItem(scientificItem)
+
+        // 2) Graphing (Chart)
+        let graphingItem = NSMenuItem()
+        graphingItem.title = ""
+        graphingItem.action = #selector(openGraphingFromStatus)
+        graphingItem.target = self
+        statusGraphingItem = graphingItem
+        menu.addItem(graphingItem)
+
+        // 3) Algebra (Matrix)
+        let algebraItem = NSMenuItem()
+        algebraItem.title = ""
+        algebraItem.action = #selector(openMatrixFromStatus)
+        algebraItem.target = self
+        statusAlgebraItem = algebraItem
+        menu.addItem(algebraItem)
+
+        // Separator
+        menu.addItem(NSMenuItem.separator())
+
+        // Quit (at bottom)
+        let quitItem = NSMenuItem()
+        quitItem.title = ""
+        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Quit")
+        quitItem.action = #selector(quitApp)
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Set initial icon brightness according to current selected page
+        updateStatusMenuSelection()
+
+        // Attach the menu to the status item (clicking the icon opens this menu)
+        statusItem?.menu = menu
     }
 
     @objc private func quitApp() {

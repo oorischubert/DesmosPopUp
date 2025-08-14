@@ -14,7 +14,7 @@ DesmosPopUp is a lightweight macOS menu bar app that provides quick access to De
 
 ### Option 1: Download DMG
 
-- Download the latest `.dmg` release from the [Releases](https://github.com/oorischubert/DesmosPopUp/releases/tag/DesmosPopUpv1) page.
+- Download the latest `.dmg` release from the [Releases](https://github.com/oorischubert/DesmosPopUp/releases) page.
 - Open the DMG and drag `DesmosPopUp.app` to your Applications folder.
 - Launch the app from Applications.
 
