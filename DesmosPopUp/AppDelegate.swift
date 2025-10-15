@@ -148,9 +148,9 @@ private final class TitlebarButtonContainer: NSView {
     private let defaultsKeyHotKeyCode = "DesmosHotkeyKeyCode"
     private let defaultsKeyHotKeyMods = "DesmosHotkeyModifiers"
     private let defaultsKeyHotKeyDisplay = "DesmosHotkeyDisplay"
-    private let glassAlpha: CGFloat = 0.95 // liquid-ass transparency
+    private let glassAlpha: CGFloat = 0.975
     private let glassCornerRadius: CGFloat = 14
-    private let glassShadowThickness: CGFloat = 0.25
+    private let glassShadowThickness: CGFloat = 1.0
     private let bottomCornerMask: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -662,6 +662,10 @@ private final class TitlebarButtonContainer: NSView {
         // Local monitor captures the next keyDown
         hotkeyCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             guard let self = self else { return event }
+            // If the main window is hidden, abort capture and allow key to pass through
+            if !(self.desmosWindowController?.window?.isVisible ?? false) {
+                return event
+            }
             // Escape cancels
             if event.keyCode == kVK_Escape { // Esc
                 self.endHotkeyCapture(alert: alert, window: window, cancelled: true)
@@ -695,8 +699,11 @@ private final class TitlebarButtonContainer: NSView {
         })
 
         // Present as sheet so app stays key
-        alert.beginSheetModal(for: window) { _ in
-            // Cleanup handled in endHotkeyCapture
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            if response == .alertFirstButtonReturn {
+                self.cleanupHotkeyCapture(cancelled: true)
+            }
         }
         DispatchQueue.main.async { [weak self] in
             self?.styleHotkeySheet(alert)
@@ -721,16 +728,26 @@ private final class TitlebarButtonContainer: NSView {
         }
     }
 
-    private func endHotkeyCapture(alert: NSAlert, window: NSWindow, cancelled: Bool) {
+    private func cleanupHotkeyCapture(cancelled: Bool) {
+        var didCleanup = false
         if let monitor = hotkeyCaptureMonitor {
             NSEvent.removeMonitor(monitor)
             hotkeyCaptureMonitor = nil
+            didCleanup = true
         }
-        window.endSheet(alert.window)
-        if cancelled {
-            print("Hotkey capture cancelled.")
-        } else {
-            print("New hotkey set to: \(currentHotKeyDisplay)")
+        if didCleanup {
+            if cancelled {
+                print("Hotkey capture cancelled.")
+            } else {
+                print("New hotkey set to: \(currentHotKeyDisplay)")
+            }
+        }
+    }
+
+    private func endHotkeyCapture(alert: NSAlert, window: NSWindow, cancelled: Bool) {
+        cleanupHotkeyCapture(cancelled: cancelled)
+        if alert.window.sheetParent != nil {
+            window.endSheet(alert.window)
         }
     }
 
