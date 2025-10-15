@@ -8,6 +8,7 @@
 import Cocoa
 import Carbon.HIToolbox
 import WebKit
+import QuartzCore
 
 // MARK: - Carbon constants (if not in bridging header)
 public let kEventParamNameHotKeyID: UInt32 = 0x686B6964  // 'hkid'
@@ -36,6 +37,60 @@ func HotKeyHandlerCallback(
         mySelf.toggleDesmosWindow()
     }
     return noErr
+}
+
+private final class GlassBorderView: NSView {
+    var borderWidth: CGFloat = 1 {
+        didSet { needsLayout = true }
+    }
+    var cornerRadius: CGFloat = 12 {
+        didSet { needsLayout = true }
+    }
+    var maskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] {
+        didSet { needsLayout = true }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        wantsLayer = true
+        // isOpaque = false
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.masksToBounds = false
+        layer?.maskedCorners = maskedCorners
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+
+    override func layout() {
+        super.layout()
+        guard let layer = layer else { return }
+        layer.borderWidth = borderWidth
+        layer.cornerRadius = cornerRadius
+        layer.maskedCorners = maskedCorners
+        layer.shadowPath = nil
+    }
+}
+
+private final class TitlebarButtonContainer: NSView {
+    override func layout() {
+        super.layout()
+        for subview in subviews {
+            var frame = subview.frame
+            frame.origin.y = round((bounds.height - frame.height) / 2)
+            subview.frame = frame
+        }
+    }
 }
 
 @objc class AppDelegate: NSObject, NSApplicationDelegate {
@@ -93,6 +148,10 @@ func HotKeyHandlerCallback(
     private let defaultsKeyHotKeyCode = "DesmosHotkeyKeyCode"
     private let defaultsKeyHotKeyMods = "DesmosHotkeyModifiers"
     private let defaultsKeyHotKeyDisplay = "DesmosHotkeyDisplay"
+    private let glassAlpha: CGFloat = 0.95 // liquid-ass transparency
+    private let glassCornerRadius: CGFloat = 14
+    private let glassShadowThickness: CGFloat = 0.25
+    private let bottomCornerMask: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         setupDesmosWindow()
@@ -112,16 +171,26 @@ func HotKeyHandlerCallback(
         // Prevent window from being resized below a minimum size
         window.minSize = NSSize(width: 225, height: 400)
         // Make the window itself transparent so vibrancy shines through
-        window.isOpaque = false
+        // window.isOpaque = false
         window.backgroundColor = .clear
+        // Keep the pop-up above other apps and following the active Space
+        window.level = .floating
+        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .visible
+        window.isMovableByWindowBackground = true
+        window.hasShadow = false
+        applyLiquidGlassEffect(to: window)
 
         let contentBounds = window.contentView!.bounds
         // ---------- Frosted blur background ----------
         let blurView = NSVisualEffectView(frame: contentBounds)
         blurView.autoresizingMask = [.width, .height]
-        blurView.material = .sidebar          // pick the material you prefer
+        blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
         blurView.state = .active
+        blurView.alphaValue = glassAlpha
+        applyCornerMask(to: blurView, radius: glassCornerRadius, corners: bottomCornerMask)
         window.contentView?.addSubview(blurView)
 
         matrixWebView = WKWebView(frame: contentBounds)
@@ -132,8 +201,10 @@ func HotKeyHandlerCallback(
         scientificWebView.setValue(false, forKey: "drawsBackground")
 
         for view in [matrixWebView, graphingWebView, scientificWebView] {
-            view!.autoresizingMask = [.width, .height]
-            window.contentView?.addSubview(view!)
+            guard let webView = view else { continue }
+            webView.autoresizingMask = [.width, .height]
+            applyCornerMask(to: webView, radius: glassCornerRadius, corners: bottomCornerMask)
+            window.contentView?.addSubview(webView)
         }
 
         matrixWebView.load(URLRequest(url: URL(string: "https://www.desmos.com/matrix")!))
@@ -145,22 +216,34 @@ func HotKeyHandlerCallback(
         graphingWebView.isHidden = true
         scientificWebView.isHidden = false
         desmosWebView = scientificWebView
+        if let frameView = window.contentView?.superview {
+            applyCornerMask(to: frameView, radius: glassCornerRadius, corners: bottomCornerMask, masksToBounds: false)
+            let borderIdentifier = NSUserInterfaceItemIdentifier("LiquidGlassMainBorder")
+            addGlassBorder(to: frameView, identifier: borderIdentifier)
+        }
         
         // ---- ADD A TITLE BAR ACCESSORY WITH SETTINGS BUTTON ----
         let accessoryVC = NSTitlebarAccessoryViewController()
         // Instead of accessoryVC.layoutAttribute = .right
         accessoryVC.layoutAttribute = .left
 
+        let accessoryHeight: CGFloat = 36
+        let accessoryButtonSize: CGFloat = 28
+        let accessoryHorizontalPadding: CGFloat = 6
+
         // Container with a single Settings (gear) button that shows a pop-down menu
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        let containerWidth = accessoryHorizontalPadding * 2 + accessoryButtonSize
+        let containerView = TitlebarButtonContainer(frame: NSRect(x: 0, y: 0, width: containerWidth, height: accessoryHeight))
+        containerView.autoresizingMask = [.height]
         accessoryVC.view = containerView
 
-        let settingsButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
+        let settingsButton = NSButton(frame: NSRect(x: accessoryHorizontalPadding, y: 0, width: accessoryButtonSize, height: accessoryButtonSize))
         settingsButton.bezelStyle = .inline
         settingsButton.title = ""
         settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
         settingsButton.action = #selector(showSettingsMenu(_:))
         settingsButton.target = self
+        settingsButton.autoresizingMask = [.minYMargin, .maxYMargin]
         containerView.addSubview(settingsButton)
 
         // Then attach
@@ -172,11 +255,15 @@ func HotKeyHandlerCallback(
         // Create a second titlebar accessory for the right side
         let rightAccessoryVC = NSTitlebarAccessoryViewController()
         rightAccessoryVC.layoutAttribute = .right
-        let rightContainer = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 30))
+        let interButtonSpacing: CGFloat = 8
+        let buttonStep = accessoryButtonSize + interButtonSpacing
+        let rightContainerWidth = accessoryHorizontalPadding * 2 + (accessoryButtonSize * 3) + (interButtonSpacing * 2)
+        let rightContainer = TitlebarButtonContainer(frame: NSRect(x: 0, y: 0, width: rightContainerWidth, height: accessoryHeight))
+        rightContainer.autoresizingMask = [.height]
         rightAccessoryVC.view = rightContainer
 
         // Button to load Matrix
-        matrixButton = NSButton(frame: NSRect(x: 0, y: 0, width: 25, height: 25))
+        matrixButton = NSButton(frame: NSRect(x: accessoryHorizontalPadding, y: 0, width: accessoryButtonSize, height: accessoryButtonSize))
         matrixButton.setButtonType(.toggle)
         matrixButton.bezelStyle = .inline
         matrixButton.title = ""
@@ -187,10 +274,11 @@ func HotKeyHandlerCallback(
         
         matrixButton.action = #selector(loadMatrix)
         matrixButton.target = self
+        matrixButton.autoresizingMask = [.minYMargin, .maxYMargin]
         rightContainer.addSubview(matrixButton)
 
         // Button to load Graphing Calculator
-        graphingButton = NSButton(frame: NSRect(x: 30, y: 0, width: 25, height: 25))
+        graphingButton = NSButton(frame: NSRect(x: accessoryHorizontalPadding + buttonStep, y: 0, width: accessoryButtonSize, height: accessoryButtonSize))
         graphingButton.setButtonType(.toggle)
         graphingButton.bezelStyle = .inline
         graphingButton.title = ""
@@ -201,10 +289,11 @@ func HotKeyHandlerCallback(
 
         graphingButton.action = #selector(loadGraphing)
         graphingButton.target = self
+        graphingButton.autoresizingMask = [.minYMargin, .maxYMargin]
         rightContainer.addSubview(graphingButton)
         
         // Button to load Scientific Calculator
-        scientificButton = NSButton(frame: NSRect(x: 60, y: 0, width: 25, height: 25))
+        scientificButton = NSButton(frame: NSRect(x: accessoryHorizontalPadding + (buttonStep * 2), y: 0, width: accessoryButtonSize, height: accessoryButtonSize))
         scientificButton.setButtonType(.toggle)
         scientificButton.bezelStyle = .inline
         scientificButton.title = ""
@@ -214,6 +303,7 @@ func HotKeyHandlerCallback(
             .withSymbolConfiguration(boldWhiteConfig)
         scientificButton.action = #selector(loadScientific)
         scientificButton.target = self
+        scientificButton.autoresizingMask = [.minYMargin, .maxYMargin]
         rightContainer.addSubview(scientificButton)
 
         window.addTitlebarAccessoryViewController(rightAccessoryVC)
@@ -250,6 +340,9 @@ func HotKeyHandlerCallback(
     /// Shows a pop-down settings menu anchored to the gear button.
     @objc private func showSettingsMenu(_ sender: NSButton) {
         let menu = NSMenu()
+        if #available(macOS 10.14, *) {
+            menu.appearance = NSAppearance(named: .vibrantDark)
+        }
 
         // Show current hotkey
         let currentItem = NSMenuItem(title: "Hotkey: \(currentHotKeyDisplay)", action: nil, keyEquivalent: "")
@@ -321,7 +414,16 @@ func HotKeyHandlerCallback(
     }
 
 
-    
+    private func applyCornerMask(to view: NSView, radius: CGFloat, corners: CACornerMask, masksToBounds: Bool = true) {
+        view.wantsLayer = true
+        guard let layer = view.layer else { return }
+        layer.cornerRadius = radius
+        layer.maskedCorners = corners
+        layer.masksToBounds = masksToBounds
+    }
+
+
+
     /// Switches the visible webview; reloads if already active, but only when window is visible
     private func switchTo(_ webView: WKWebView) {
         // If the requested webView is already active, only refresh when the window is visible
@@ -335,6 +437,98 @@ func HotKeyHandlerCallback(
         desmosWebView?.isHidden = true
         webView.isHidden = false
         desmosWebView = webView
+    }
+
+    private func addGlassBackground(to view: NSView, identifier: NSUserInterfaceItemIdentifier) {
+        if view.subviews.contains(where: { $0.identifier == identifier }) { return }
+
+        let glassBackground = NSVisualEffectView()
+        glassBackground.identifier = identifier
+        glassBackground.material = .hudWindow
+        glassBackground.state = .active
+        glassBackground.alphaValue = glassAlpha
+        glassBackground.blendingMode = .behindWindow
+        glassBackground.translatesAutoresizingMaskIntoConstraints = false
+        applyCornerMask(to: glassBackground, radius: glassCornerRadius, corners: bottomCornerMask)
+
+        if let firstSubview = view.subviews.first {
+            view.addSubview(glassBackground, positioned: .below, relativeTo: firstSubview)
+        } else {
+            view.addSubview(glassBackground)
+        }
+
+        NSLayoutConstraint.activate([
+            glassBackground.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            glassBackground.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            glassBackground.topAnchor.constraint(equalTo: view.topAnchor),
+            glassBackground.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func addGlassBorder(to view: NSView, identifier: NSUserInterfaceItemIdentifier) {
+        if view.subviews.contains(where: { $0.identifier == identifier }) { return }
+
+        let borderView = GlassBorderView()
+        borderView.identifier = identifier
+        borderView.translatesAutoresizingMaskIntoConstraints = false
+        let baseCorner = view.layer?.cornerRadius ?? glassCornerRadius
+        borderView.borderWidth = glassShadowThickness
+        borderView.cornerRadius = baseCorner + glassShadowThickness
+        borderView.maskedCorners = bottomCornerMask
+
+        if let layer = borderView.layer {
+            layer.backgroundColor = NSColor.clear.cgColor
+            layer.borderColor = NSColor(calibratedWhite: 1.0, alpha: glassAlpha * 0.85).cgColor
+            layer.masksToBounds = false
+            layer.shadowColor = NSColor(calibratedWhite: 1.0, alpha: glassAlpha * 0.4).cgColor
+            layer.shadowOpacity = Float(glassAlpha * 0.45)
+            layer.shadowRadius = glassShadowThickness * 1.6
+            layer.shadowOffset = .zero
+        }
+
+        view.addSubview(borderView, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            borderView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: -glassShadowThickness),
+            borderView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: glassShadowThickness),
+            borderView.topAnchor.constraint(equalTo: view.topAnchor, constant: -glassShadowThickness),
+            borderView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: glassShadowThickness)
+        ])
+    }
+
+    private func applyLiquidGlassEffect(to window: NSWindow) {
+        guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else { return }
+        let effectIdentifier = NSUserInterfaceItemIdentifier("LiquidGlassTitlebarEffect")
+        if titlebarView.subviews.contains(where: { $0.identifier == effectIdentifier }) { return }
+
+        let glassView = NSVisualEffectView(frame: titlebarView.bounds)
+        glassView.autoresizingMask = [.width, .height]
+        glassView.material = .hudWindow
+        glassView.state = .active
+        glassView.blendingMode = .withinWindow
+        glassView.identifier = effectIdentifier
+        glassView.alphaValue = glassAlpha
+        titlebarView.addSubview(glassView, positioned: .below, relativeTo: nil)
+    }
+
+    private func styleHotkeySheet(_ alert: NSAlert) {
+        let sheetWindow = alert.window
+        sheetWindow.titleVisibility = .hidden
+        sheetWindow.titlebarAppearsTransparent = true
+        // sheetWindow.isOpaque = false
+        sheetWindow.backgroundColor = .clear
+        sheetWindow.hasShadow = false
+        applyLiquidGlassEffect(to: sheetWindow)
+
+        if let container = sheetWindow.contentView?.superview {
+            container.wantsLayer = true
+            applyCornerMask(to: container, radius: glassCornerRadius, corners: bottomCornerMask)
+
+            let backgroundIdentifier = NSUserInterfaceItemIdentifier("LiquidGlassHotkeySheetBackground")
+            addGlassBackground(to: container, identifier: backgroundIdentifier)
+
+            let borderIdentifier = NSUserInterfaceItemIdentifier("LiquidGlassHotkeySheetBorder")
+            addGlassBorder(to: container, identifier: borderIdentifier)
+        }
     }
 
     /// Highlights the selected calculator button in bold white and dims the others
@@ -503,6 +697,9 @@ func HotKeyHandlerCallback(
         // Present as sheet so app stays key
         alert.beginSheetModal(for: window) { _ in
             // Cleanup handled in endHotkeyCapture
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.styleHotkeySheet(alert)
         }
     }
 
