@@ -46,7 +46,7 @@ private final class GlassBorderView: NSView {
     var cornerRadius: CGFloat = 12 {
         didSet { needsLayout = true }
     }
-    var maskedCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] {
+    var maskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner] {
         didSet { needsLayout = true }
     }
 
@@ -149,9 +149,16 @@ private final class TitlebarButtonContainer: NSView {
     private let defaultsKeyHotKeyMods = "DesmosHotkeyModifiers"
     private let defaultsKeyHotKeyDisplay = "DesmosHotkeyDisplay"
     private let glassAlpha: CGFloat = 0.975
-    private let glassCornerRadius: CGFloat = 14
+    private let glassCornerRadius: CGFloat = 12
+    private let glassContentBorderThickness: CGFloat = 5
     private let glassShadowThickness: CGFloat = 1.0
-    private let bottomCornerMask: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+    private let contentCornerMask: CACornerMask = [
+        .layerMinXMinYCorner, .layerMaxXMinYCorner,
+        .layerMinXMaxYCorner, .layerMaxXMaxYCorner
+    ]
+    private let bottomCornerMask: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+    private let statusMenuIconSize: CGFloat = 17
+    private let statusMenuSelectedIconSize: CGFloat = 18
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         setupDesmosWindow()
@@ -182,29 +189,52 @@ private final class TitlebarButtonContainer: NSView {
         window.hasShadow = false
         applyLiquidGlassEffect(to: window)
 
-        let contentBounds = window.contentView!.bounds
+        guard let contentView = window.contentView else { return }
         // ---------- Frosted blur background ----------
-        let blurView = NSVisualEffectView(frame: contentBounds)
-        blurView.autoresizingMask = [.width, .height]
+        let blurView = NSVisualEffectView()
+        blurView.translatesAutoresizingMaskIntoConstraints = false
         blurView.material = .hudWindow
-        blurView.blendingMode = .behindWindow
+        blurView.blendingMode = .withinWindow
         blurView.state = .active
         blurView.alphaValue = glassAlpha
         applyCornerMask(to: blurView, radius: glassCornerRadius, corners: bottomCornerMask)
-        window.contentView?.addSubview(blurView)
+        contentView.addSubview(blurView)
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
 
-        matrixWebView = WKWebView(frame: contentBounds)
+        let webContainer = NSView()
+        webContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(webContainer)
+        NSLayoutConstraint.activate([
+            webContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: glassContentBorderThickness),
+            webContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -glassContentBorderThickness),
+            webContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
+            webContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -glassContentBorderThickness)
+        ])
+        applyCornerMask(to: webContainer, radius: glassCornerRadius, corners: contentCornerMask)
+
+        matrixWebView = WKWebView(frame: .zero)
         matrixWebView.setValue(false, forKey: "drawsBackground")  // transparency
-        graphingWebView = WKWebView(frame: contentBounds)
+        graphingWebView = WKWebView(frame: .zero)
         graphingWebView.setValue(false, forKey: "drawsBackground")
-        scientificWebView = WKWebView(frame: contentBounds)
+        scientificWebView = WKWebView(frame: .zero)
         scientificWebView.setValue(false, forKey: "drawsBackground")
 
         for view in [matrixWebView, graphingWebView, scientificWebView] {
             guard let webView = view else { continue }
-            webView.autoresizingMask = [.width, .height]
-            applyCornerMask(to: webView, radius: glassCornerRadius, corners: bottomCornerMask)
-            window.contentView?.addSubview(webView)
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            applyCornerMask(to: webView, radius: glassCornerRadius, corners: contentCornerMask)
+            webContainer.addSubview(webView)
+            NSLayoutConstraint.activate([
+                webView.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+                webView.topAnchor.constraint(equalTo: webContainer.topAnchor),
+                webView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor)
+            ])
         }
 
         matrixWebView.load(URLRequest(url: URL(string: "https://www.desmos.com/matrix")!))
@@ -365,7 +395,9 @@ private final class TitlebarButtonContainer: NSView {
 
         // 3) Quit item
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "")
-        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)
+        let quitIconConfig = NSImage.SymbolConfiguration(paletteColors: [.labelColor])
+        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)?
+            .withSymbolConfiguration(quitIconConfig)
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -542,12 +574,15 @@ private final class TitlebarButtonContainer: NSView {
 
     /// Returns a regular SF Symbol image for the status menu.
     private func statusImage(named: String) -> NSImage? {
-        return NSImage(systemSymbolName: named, accessibilityDescription: nil)
+        let config = NSImage.SymbolConfiguration(pointSize: statusMenuIconSize, weight: .semibold)
+        let greyConfig = config.applying(.init(paletteColors: [.secondaryLabelColor]))
+        return NSImage(systemSymbolName: named, accessibilityDescription: nil)?
+            .withSymbolConfiguration(greyConfig)
     }
 
     /// Returns a "bright" (bold white) variant of the SF Symbol for the selected menu item.
     private func selectedStatusImage(named: String) -> NSImage? {
-        let boldConfig = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize, weight: .bold)
+        let boldConfig = NSImage.SymbolConfiguration(pointSize: statusMenuSelectedIconSize, weight: .bold)
         let boldWhiteConfig = boldConfig.applying(.init(paletteColors: [.white]))
         return NSImage(systemSymbolName: named, accessibilityDescription: nil)?.withSymbolConfiguration(boldWhiteConfig)
     }
@@ -886,7 +921,7 @@ private final class TitlebarButtonContainer: NSView {
         // Quit (at bottom)
         let quitItem = NSMenuItem()
         quitItem.title = ""
-        quitItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Quit")
+        quitItem.image = statusImage(named: "xmark.circle")
         quitItem.action = #selector(quitApp)
         quitItem.target = self
         menu.addItem(quitItem)
